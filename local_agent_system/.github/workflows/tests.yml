@@ -1,0 +1,351 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: "3.9"
+  OLLAMA_VERSION: "latest"
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/test_requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r tests/test_requirements.txt
+    
+    - name: Run unit tests
+      run: |
+        cd local_agent_system
+        python -m pytest tests/ -m "unit" -v --tb=short
+    
+    - name: Upload unit test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unit-test-results-${{ matrix.python-version }}
+        path: local_agent_system/test-results.xml
+
+  mock-tests:
+    name: Mock Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/test_requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r tests/test_requirements.txt
+    
+    - name: Run mock tests
+      run: |
+        cd local_agent_system
+        python -m pytest tests/ -m "mock" -v --tb=short --cov=. --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./local_agent_system/coverage.xml
+        flags: mock-tests
+        name: mock-tests-coverage
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Ollama
+      run: |
+        curl -fsSL https://ollama.ai/install.sh | sh
+        # Start Ollama in background
+        nohup ollama serve &
+        sleep 10
+        # Pull required models for testing
+        ollama pull llama3.2:3b
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/test_requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r tests/test_requirements.txt
+    
+    - name: Wait for Ollama to be ready
+      run: |
+        timeout 60 bash -c 'until curl -s http://localhost:11434/api/tags; do sleep 2; done'
+    
+    - name: Run integration tests
+      run: |
+        cd local_agent_system
+        python -m pytest tests/ -m "integration" -v --tb=short --timeout=300
+      env:
+        AGENT_SYSTEM_OLLAMA_URL: "http://localhost:11434"
+    
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: local_agent_system/test-results.xml
+
+  benchmark-tests:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/test_requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r tests/test_requirements.txt
+    
+    - name: Run benchmark tests
+      run: |
+        cd local_agent_system
+        python -m pytest tests/ -m "benchmark" -v --tb=short
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: benchmark-results
+        path: local_agent_system/benchmark-results.json
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+    
+    - name: Run Bandit security scan
+      run: |
+        cd local_agent_system
+        bandit -r . -x tests/ -f json -o bandit-report.json
+    
+    - name: Run Safety check
+      run: |
+        cd local_agent_system
+        safety check --json --output safety-report.json
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          local_agent_system/bandit-report.json
+          local_agent_system/safety-report.json
+
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install quality tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 mypy black isort
+        pip install -r requirements.txt
+    
+    - name: Run Black formatting check
+      run: |
+        cd local_agent_system
+        black --check --diff .
+    
+    - name: Run isort import sorting check
+      run: |
+        cd local_agent_system
+        isort --check-only --diff .
+    
+    - name: Run flake8 linting
+      run: |
+        cd local_agent_system
+        flake8 . --exclude=tests/,venv/,env/,.venv/ --max-line-length=100
+    
+    - name: Run mypy type checking
+      run: |
+        cd local_agent_system
+        mypy . --ignore-missing-imports --exclude=tests/
+
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [unit-tests, mock-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/test_requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r tests/test_requirements.txt
+    
+    - name: Run all tests with coverage
+      run: |
+        cd local_agent_system
+        python -m pytest tests/ -m "unit or mock" --cov=. --cov-report=html --cov-report=xml --cov-report=term
+    
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-reports
+        path: |
+          local_agent_system/htmlcov/
+          local_agent_system/coverage.xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./local_agent_system/coverage.xml
+        flags: all-tests
+        name: comprehensive-coverage
+
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    needs: [unit-tests, mock-tests, integration-tests, benchmark-tests, security-scan, code-quality, coverage-report]
+    if: always()
+    
+    steps:
+    - name: Determine overall status
+      id: status
+      run: |
+        if [[ "${{ needs.unit-tests.result }}" == "success" && \
+              "${{ needs.mock-tests.result }}" == "success" && \
+              "${{ needs.integration-tests.result }}" == "success" && \
+              "${{ needs.benchmark-tests.result }}" == "success" && \
+              "${{ needs.security-scan.result }}" == "success" && \
+              "${{ needs.code-quality.result }}" == "success" && \
+              "${{ needs.coverage-report.result }}" == "success" ]]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Success notification
+      if: steps.status.outputs.status == 'success'
+      run: echo "🎉 All tests and quality checks passed!"
+    
+    - name: Failure notification
+      if: steps.status.outputs.status == 'failure'
+      run: |
+        echo "💥 Some tests or quality checks failed:"
+        echo "  Unit tests: ${{ needs.unit-tests.result }}"
+        echo "  Mock tests: ${{ needs.mock-tests.result }}"
+        echo "  Integration tests: ${{ needs.integration-tests.result }}"
+        echo "  Benchmark tests: ${{ needs.benchmark-tests.result }}"
+        echo "  Security scan: ${{ needs.security-scan.result }}"
+        echo "  Code quality: ${{ needs.code-quality.result }}"
+        echo "  Coverage report: ${{ needs.coverage-report.result }}"
