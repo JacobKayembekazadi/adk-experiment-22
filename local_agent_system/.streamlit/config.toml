@@ -1,5 +1,5 @@
 # Streamlit Configuration for Local Agent Collaboration System
-# Save this as .streamlit/config.toml in your project directory
+# Updated configuration compatible with Streamlit 1.46+
 
 [server]
 # Server configuration
@@ -7,12 +7,11 @@ port = 8501
 address = "localhost"
 headless = false
 runOnSave = false
-allowRunOnSave = false
 
 # File watching
 fileWatcherType = "auto"
-enableCORS = false
-enableXsrfProtection = true
+enableXsrfProtection = false
+enableCORS = true
 
 # Performance settings
 maxUploadSize = 200
@@ -31,18 +30,3 @@ backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F0F2F6"
 textColor = "#262730"
 font = "sans serif"
-
-[global]
-# Global configuration
-disableWatchdogWarning = true
-developmentMode = false
-logLevel = "info"
-
-# Sharing
-showWarningOnDirectExecution = true
-
-[client]
-# Client configuration
-caching = true
-displayEnabled = true
-toolbarMode = "auto"
